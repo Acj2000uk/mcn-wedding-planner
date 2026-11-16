@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>MCN Wedding Planner Demo</title>
+    <meta
+      name="description"
+      content="Plan your wedding menus, guest list and seating with the MCN team."
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="demo-bar no-print">
+      <div>
+        <strong>Demo only · fictional wedding</strong
+        ><span> Changes reset when you refresh. No Firebase connection.</span>
+      </div>
+      <button type="button" data-action="demo-role" id="demo-role">
+        View as couple
+      </button>
+    </header>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <main id="app">
+      <section class="welcome">
+        <p class="eyebrow">MCN COLLECTION</p>
+        <h1>Wedding Day Plan</h1>
+        <p>Connecting to your wedding planner…</p>
+      </section>
+    </main>
+    <dialog id="dialog"></dialog>
+    <script type="module" src="/app.mjs"></script>
+  </body>
+</html>

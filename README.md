@@ -84,3 +84,11 @@ Current scope does not include reminder emails, a staff menu editor, Gibraltar R
 - [Firebase ID-token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens)
 - [Staff roles with custom claims](https://firebase.google.com/docs/auth/admin/custom-claims)
 - [Firestore transactions](https://firebase.google.com/docs/firestore/manage-data/transactions)
+
+## Planning checklist and isolated demo
+
+`/demo.html` opens an explicitly labelled fictional wedding without Firebase. All changes remain in memory and reset on refresh. Staff/couple switching exercises the same pure transition rules as the API, without granting real access or writing records. Printed demo sheets are labelled fictional.
+
+The planning checklist links to pending RSVPs, missing meal choices and unseated guests. Guest search covers names, tables, meals and dietary notes. Group seating rejects non-attending guests, locked weddings and capacity overflow. Guest rows use a stacked layout on small screens.
+
+Validation: 36 domain, API and planning tests pass. Browser checks cover checklist filtering, guest search and assigning two guests together. Live Firebase login and cross-device acceptance testing remain pending configuration.

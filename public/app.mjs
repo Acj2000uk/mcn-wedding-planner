@@ -1,3 +1,9 @@
+import {
+  filterGuests,
+  planningSummary,
+  missingMeals,
+  assignSeats,
+} from "./planning.mjs";
 import { MENUS, SHARED_MENUS } from "./menus.mjs";
 import {
   courses,
@@ -30,6 +36,10 @@ const dateLabel = (d) =>
     month: "short",
     year: "numeric",
   });
+const demoMode = location.pathname === "/demo.html";
+let demoStore;
+let guestSearch = "",
+  guestFilter = "all";
 let user,
   staff = false,
   db,
@@ -39,7 +49,7 @@ let user,
   unsubscribe,
   weddings = [],
   selected = null,
-  view = "menu",
+  view = "overview",
   busy = false,
   modalContext,
   filter = "",
@@ -95,6 +105,7 @@ function errorMessage(e) {
   return messages[e.code] || e.message || "Something went wrong. Please retry.";
 }
 async function api(command) {
+  if (demoMode) return demoStore.command(command, staff);
   const token = await user.getIdToken();
   const r = await fetch("/api/wedding", {
     method: "POST",
@@ -137,7 +148,7 @@ function render() {
     return;
   }
   if (!user.emailVerified) {
-    app.innerHTML = `<section class="welcome"><p class="eyebrow">ONE MORE STEP</p><h1>Verify your email</h1><p>Open the verification email sent to ${esc(user.email)}.</p><div class="stack">${btn("I have verified my email", "verified", "", true)}${btn("Resend verification", "resend")}${btn("Sign out", "logout")}</div></section>`;
+    app.innerHTML = `<section class="welcome"><p class="eyebrow">ONE MORE STEP</p><h1>Verify your email</h1><p>Open the verification email sent to ${esc(user.email)}.</p><div class="stack">${btn("I have verified my email", "verified", "", true)}${btn("Resend verification", "resend")}${btn(demoMode ? "Reset demo" : "Sign out", "logout")}</div></section>`;
     return;
   }
   const w = current();
@@ -147,6 +158,7 @@ function render() {
   }
   const locked = w.eventDetails.isSubmitted || w.archived;
   const tabs = [
+    ["overview", "Planning checklist"],
     ["menu", "Menu options"],
     ["guests", "Guest list"],
     ["seating", "Seating plan"],
@@ -154,7 +166,7 @@ function render() {
     ["report", "Kitchen & service sheets"],
     ["settings", "Wedding details"],
   ];
-  app.innerHTML = `<div class="layout"><aside><p class="eyebrow">MCN COLLECTION</p><h2>Wedding<br>Day Plan</h2><p class="muted">${esc(MENUS[w.eventDetails.venue].name)}</p><nav class="nav" aria-label="Wedding sections">${tabs.map(([id, label]) => btn(label, "tab", `data-tab="${id}"`)).join("")}${btn(staff ? "All weddings" : "My weddings", "dashboard")}${btn("Sign out", "logout")}</nav></aside><section class="content"><header class="page-header"><div class="row spread"><p class="eyebrow">${staff ? "STAFF PORTAL" : "YOUR WEDDING"}</p><span class="pill ${locked ? "good" : ""}">${w.archived ? "Archived" : locked ? "Submitted" : "Planning"}</span></div><h1>${esc(w.eventDetails.partner1)} &amp; ${esc(w.eventDetails.partner2)}</h1><p class="muted">${dateLabel(w.eventDetails.date)} · Final details by ${dateLabel(deadline(w.eventDetails.date))}</p>${locked ? '<div class="banner success">' + (w.archived ? "This wedding is archived." : "Your final details are submitted. Contact the venue if anything changes.") + "</div>" : ""}</header><div id="page">${view === "menu" ? menuPage(w) : view === "guests" ? guestPage(w) : view === "seating" ? seatingPage(w) : view === "totals" ? totalsPage(w) : view === "settings" ? settingsPage(w) : reportPage(w)}</div><footer class="footer">Saved version ${w.revision} · ${esc(new Date(w.updatedAt).toLocaleString("en-GB"))}</footer></section></div>`;
+  app.innerHTML = `<div class="layout"><aside><p class="eyebrow">MCN COLLECTION</p><h2>Wedding<br>Day Plan</h2><p class="muted">${esc(MENUS[w.eventDetails.venue].name)}</p><nav class="nav" aria-label="Wedding sections">${tabs.map(([id, label]) => btn(label, "tab", `data-tab="${id}"`)).join("")}${btn(staff ? "All weddings" : "My weddings", "dashboard")}${btn(demoMode ? "Reset demo" : "Sign out", "logout")}</nav></aside><section class="content"><header class="page-header"><div class="row spread"><p class="eyebrow">${staff ? "STAFF PORTAL" : "YOUR WEDDING"}</p><span class="pill ${locked ? "good" : ""}">${w.archived ? "Archived" : locked ? "Submitted" : "Planning"}</span></div><h1>${esc(w.eventDetails.partner1)} &amp; ${esc(w.eventDetails.partner2)}</h1><p class="muted">${dateLabel(w.eventDetails.date)} · Final details by ${dateLabel(deadline(w.eventDetails.date))}</p>${locked ? '<div class="banner success">' + (w.archived ? "This wedding is archived." : "Your final details are submitted. Contact the venue if anything changes.") + "</div>" : ""}</header><div id="page">${view === "overview" ? overviewPage(w) : view === "menu" ? menuPage(w) : view === "guests" ? guestPage(w) : view === "seating" ? seatingPage(w) : view === "totals" ? totalsPage(w) : view === "settings" ? settingsPage(w) : reportPage(w)}</div><footer class="footer">Saved version ${w.revision} · ${esc(new Date(w.updatedAt).toLocaleString("en-GB"))}</footer></section></div>`;
   // Avoid duplicate class attributes on navigation buttons.
   for (const b of app.querySelectorAll("[data-tab]"))
     b.classList.toggle("active", b.dataset.tab === view);
@@ -167,7 +179,7 @@ function renderDashboard() {
         (!filter || w.eventDetails.venue === filter),
     )
     .sort((a, b) => a.eventDetails.date.localeCompare(b.eventDetails.date));
-  app.innerHTML = `<section class="content"><header class="page-header"><p class="eyebrow">MCN COLLECTION</p><div class="row spread"><h1>${staff ? "Wedding overview" : "Your weddings"}</h1><div class="row">${staff ? btn("Add wedding", "new", "", true) : ""}${btn("Sign out", "logout")}</div></div><p class="muted">${staff ? "Keep track of dates, final details and guest numbers." : "Choose your wedding to continue planning."}</p></header>${staff ? `<div class="row no-print">${select("venueFilter", "Venue", [["", "All venues"], ...Object.entries(MENUS).map(([k, v]) => [k, v.name])], filter)}${btn(archived ? "Show active weddings" : "Show archived weddings", "archive-filter")}</div><br>` : ""}<div class="grid">${
+  app.innerHTML = `<section class="content"><header class="page-header"><p class="eyebrow">MCN COLLECTION</p><div class="row spread"><h1>${staff ? "Wedding overview" : "Your weddings"}</h1><div class="row">${staff ? btn("Add wedding", "new", "", true) : ""}${btn(demoMode ? "Reset demo" : "Sign out", "logout")}</div></div><p class="muted">${staff ? "Keep track of dates, final details and guest numbers." : "Choose your wedding to continue planning."}</p></header>${staff ? `<div class="row no-print">${select("venueFilter", "Venue", [["", "All venues"], ...Object.entries(MENUS).map(([k, v]) => [k, v.name])], filter)}${btn(archived ? "Show active weddings" : "Show archived weddings", "archive-filter")}</div><br>` : ""}<div class="grid">${
     visible
       .map((w) => {
         const issues = submissionIssues(w);
@@ -206,19 +218,67 @@ function menuPage(w) {
       "",
     )}</div><p class="muted">Vegan meal options remain available in each guest’s meal choices. Changing menus may leave existing guest choices needing an update.</p>`;
 }
+function overviewPage(w) {
+  const p = planningSummary(w),
+    locked = w.archived || w.eventDetails.isSubmitted;
+  const due = w.eventDetails.isSubmitted
+    ? "Final details submitted"
+    : p.days < 0
+      ? `${Math.abs(p.days)} days past the final-details deadline`
+      : p.days === 0
+        ? "Final details are due today"
+        : `${p.days} days until final details are due`;
+  const tasks = [
+    ["RSVPs to confirm", p.pending, "guests", "pending"],
+    ["Guests needing meal choices", p.missing, "guests", "missing-meals"],
+    ["Guests needing a seat", p.unseated, "guests", "unseated"],
+    ["Tables over capacity", p.overfull, "seating", "all"],
+  ];
+  return `<div class="overview-hero"><p class="eyebrow">YOUR NEXT STEPS</p><h2>Let’s get everything ready.</h2><p>${esc(due)}</p><div class="row spread"><span>${p.ready} of ${p.attending} attending guests have meals and seats</span><strong>${p.percent}%</strong></div><progress value="${p.percent}" max="100" aria-label="Guests with meals and seats">${p.percent}%</progress><small>This tracks guest details. Menus and final sign-off are checked before submission.</small></div><div class="task-grid">${tasks.map(([label, count, tab, filter]) => `<button class="task-card" data-action="task" data-tab="${tab}" data-filter="${filter}"><span class="task-count ${count ? "needs-attention" : "complete"}">${count || "✓"}</span><span>${label}</span><small>${count ? "Review details →" : "Complete"}</small></button>`).join("")}</div><div class="grid"><section class="card"><h3>Your wedding at a glance</h3><p>${p.attending} attending · ${w.guests.filter((g) => g.isChild && g.rsvp === "attending").length} children<br>${w.tables.length} tables · ${w.guests.filter((g) => g.rsvp === "attending" && (g.isVegan || g.dietary)).length} dietary notes</p>${btn("Review your menus", "tab", 'data-tab="menu"')}</section><section class="card"><h3>Final confirmation</h3><p>${locked ? "Your wedding details are locked. Staff will help with changes." : "Review outstanding details, then sign to confirm your final numbers."}</p>${btn("Review final details", "tab", 'data-tab="totals"', true)}</section></div>`;
+}
+function guestResults(w) {
+  const locked = w.eventDetails.isSubmitted || w.archived,
+    guests = filterGuests(w, { search: guestSearch, filter: guestFilter });
+  return `<p class="muted" role="status">Showing ${guests.length} of ${w.guests.length} guests</p><div class="card table-wrap"><table class="guest-table"><thead><tr><th>Name</th><th>RSVP</th><th>Meals</th><th>Table</th><th>Dietary</th><th>Actions</th></tr></thead><tbody>${guests.map((g) => `<tr><td data-label="Name"><strong>${esc(g.name)}</strong>${g.isChild ? "<br><small>Child</small>" : ""}</td><td data-label="RSVP"><span class="pill ${g.rsvp === "attending" ? "good" : g.rsvp === "pending" ? "warn" : ""}">${esc(g.rsvp)}</span></td><td data-label="Meals">${courses.map((c) => `<div><small>${c[0].toUpperCase() + c.slice(1)}:</small> ${esc(g[c] || "Not chosen")}</div>`).join("")}${missingMeals(w, g) ? '<span class="pill warn">Needs a meal choice</span>' : ""}</td><td data-label="Table">${esc(w.tables.find((t) => t.id === g.tableId)?.name || "Unassigned")}</td><td data-label="Dietary">${g.isVegan ? "Vegan<br>" : ""}${esc(g.dietary || (!g.isVegan ? "None recorded" : ""))}</td><td data-label="Actions">${!locked ? btn("Edit", "guest", `data-id="${g.id}" aria-label="Edit ${esc(g.name)}"`) : "Locked"}</td></tr>`).join("") || '<tr><td colspan="6">' + (w.guests.length ? "No guests match these filters." : "Add your guests to start planning.") + "</td></tr>"}</tbody></table></div>`;
+}
 function guestPage(w) {
   const locked = w.eventDetails.isSubmitted || w.archived;
-  return `<div class="row spread"><h2>Guest list <span class="pill">${w.guests.length}</span></h2><div class="row">${btn("Export CSV", "csv")}${!locked ? btn("Bulk add", "bulk") + btn("Add guest", "guest", "", true) : ""}</div></div><div class="card table-wrap"><table><thead><tr><th>Name</th><th>RSVP</th><th>Meals</th><th>Table</th><th>Dietary</th><th></th></tr></thead><tbody>${w.guests.map((g) => `<tr><td>${esc(g.name)}${g.isChild ? "<br><small>Child</small>" : ""}</td><td>${esc(g.rsvp)}</td><td>${courses.map((c) => `<div>${esc(g[c] || "Not chosen")}</div>`).join("")}</td><td>${esc(w.tables.find((t) => t.id === g.tableId)?.name || "Unassigned")}</td><td>${g.isVegan ? "Vegan<br>" : ""}${esc(g.dietary)}</td><td>${!locked ? btn("Edit", "guest", `data-id="${g.id}"`) : ""}</td></tr>`).join("") || '<tr><td colspan="6">Add your guests to start planning.</td></tr>'}</tbody></table></div>`;
+  return `<div class="row spread"><h2>Guest list</h2><div class="row">${btn("Export all guests", "csv")}${!locked ? btn("Bulk add", "bulk") + btn("Add guest", "guest", "", true) : ""}</div></div><div class="guest-tools"><div><label for="guest-search">Search guests, tables or dietary notes</label><input id="guest-search" type="search" value="${esc(guestSearch)}" placeholder="Start typing a name…"></div><div>${select(
+    "guest-filter",
+    "Show guests",
+    [
+      ["all", "All guests"],
+      ["attending", "Attending"],
+      ["pending", "Pending RSVP"],
+      ["declined", "Declined"],
+      ["missing-meals", "Missing meal choices"],
+      ["unseated", "Needs a seat"],
+      ["dietary", "Dietary requirements"],
+      ["children", "Children"],
+    ],
+    guestFilter,
+  )}</div>${btn("Clear filters", "clear-filters")}</div><div id="guest-results">${guestResults(w)}</div>`;
 }
 function seatingPage(w) {
-  return `<div class="row spread"><h2>Seating plan</h2>${!w.eventDetails.isSubmitted && !w.archived ? btn("Add table", "table", "", true) : ""}</div><p class="muted">Assign seats through each guest’s details.</p><div class="grid">${w.tables
+  const locked = w.eventDetails.isSubmitted || w.archived,
+    unseated = filterGuests(w, { filter: "unseated" });
+  return `<div class="row spread"><h2>Seating plan</h2><div class="row">${!locked ? btn("Assign guests", "assign", "", true) + btn("Add table", "table") : ""}</div></div><section class="banner"><strong>${unseated.length} attending guests need seats.</strong>${unseated.length ? "<p>" + unseated.map((g) => esc(g.name)).join(", ") + "</p>" : ""}<p>Assign several guests together, or move them between tables.</p></section><div class="grid">${w.tables
     .map((t) => {
       const guests = w.guests.filter(
-        (g) => g.rsvp === "attending" && g.tableId === t.id,
-      );
-      return `<section class="card"><div class="row spread"><h3>${esc(t.name)}</h3><span class="pill ${guests.length > t.seats ? "warn" : ""}">${guests.length} / ${t.seats} seats</span></div><p class="muted">${t.shape === "round" ? "Round" : "Rectangular"} table</p><ul>${guests.map((g) => `<li>${esc(g.name)}</li>`).join("") || "<li>No guests assigned</li>"}</ul>${!w.eventDetails.isSubmitted && !w.archived ? btn("Edit table", "table", `data-id="${t.id}"`) : ""}</section>`;
+          (g) => g.rsvp === "attending" && g.tableId === t.id,
+        ),
+        remaining = t.seats - guests.length;
+      return `<section class="card"><div class="row spread"><h3>${esc(t.name)}</h3><span class="pill ${remaining < 0 ? "warn" : remaining === 0 ? "good" : ""}">${guests.length} / ${t.seats} seats</span></div><p class="muted">${t.shape === "round" ? "Round" : "Rectangular"} · ${remaining < 0 ? Math.abs(remaining) + " over capacity" : remaining === 0 ? "Table full" : remaining + (remaining === 1 ? " seat free" : " seats free")}</p><ul>${guests.map((g) => `<li>${esc(g.name)}${g.isChild ? " <small>(child)</small>" : ""}</li>`).join("") || "<li>No guests assigned</li>"}</ul>${!locked ? '<div class="row">' + btn("Assign guests", "assign", `data-id="${t.id}"`) + btn("Edit table", "table", `data-id="${t.id}"`) + "</div>" : ""}</section>`;
     })
     .join("")}</div>`;
+}
+function seatingDialog(tableId) {
+  const w = current(),
+    guests = w.guests.filter((g) => g.rsvp === "attending");
+  openModal(
+    "Assign seats",
+    `<form data-form="assign">${select("tableId", "Move selected guests to", [["", "Unassigned"], ...w.tables.map((t) => [t.id, `${t.name} (${t.seats - w.guests.filter((g) => g.rsvp === "attending" && g.tableId === t.id).length} seats free)`])], tableId || "")}<p class="muted">Choose guests below. Existing assignments move with them. Full tables cannot accept extra guests.</p><div class="seat-picker">${guests.map((g) => `<label class="check"><input type="checkbox" name="guestIds" value="${esc(g.id)}"><span><strong>${esc(g.name)}</strong><br><small>${esc(w.tables.find((t) => t.id === g.tableId)?.name || "Unassigned")}</small></span></label>`).join("") || "<p>Add attending guests first.</p>"}</div>${actions("Save seating")}</form>`,
+  );
 }
 function totalsPage(w) {
   const issues = submissionIssues(w);
@@ -230,7 +290,7 @@ function settingsPage(w) {
 }
 function reportPage(w) {
   const gs = w.guests.filter((g) => g.rsvp === "attending");
-  return `<article class="report"><div class="row spread no-print"><h2>Kitchen & service sheets</h2>${btn("Print / save PDF", "print", "", true)}</div><h1>${esc(w.eventDetails.partner1)} &amp; ${esc(w.eventDetails.partner2)}</h1><p>${dateLabel(w.eventDetails.date)} · ${esc(MENUS[w.eventDetails.venue].name)} · ${gs.length} attending (${gs.filter((g) => g.isChild).length} children)<br>${w.eventDetails.isSubmitted ? "FINAL SUBMITTED DETAILS" : "DRAFT: details may change"} · Version ${w.revision}</p><h2>Kitchen quantities</h2><div class="grid">${courses
+  return `<article class="report">${demoMode ? "<p>DEMO · FICTIONAL RECORDS</p>" : ""}<div class="row spread no-print"><h2>Kitchen & service sheets</h2>${btn("Print / save PDF", "print", "", true)}</div><h1>${esc(w.eventDetails.partner1)} &amp; ${esc(w.eventDetails.partner2)}</h1><p>${dateLabel(w.eventDetails.date)} · ${esc(MENUS[w.eventDetails.venue].name)} · ${gs.length} attending (${gs.filter((g) => g.isChild).length} children)<br>${w.eventDetails.isSubmitted ? "FINAL SUBMITTED DETAILS" : "DRAFT: details may change"} · Version ${w.revision}</p><h2>Kitchen quantities</h2><div class="grid">${courses
     .map((c) => {
       const counts = new Map();
       for (const g of gs)
@@ -379,7 +439,26 @@ async function handleAction(el) {
     closeModal();
     return;
   }
+  if (action === "demo-role" && demoMode) {
+    staff = !staff;
+    weddings = demoStore.list(staff);
+    selected = weddings[0]?.id || null;
+    user = {
+      uid: staff ? "demo-staff" : "demo-couple",
+      email: staff ? "staff@example.com" : "couple@example.com",
+      emailVerified: true,
+    };
+    document.querySelector("#demo-role").textContent = staff
+      ? "View as couple"
+      : "View as staff";
+    render();
+    return;
+  }
   if (action === "logout") {
+    if (demoMode) {
+      location.reload();
+      return;
+    }
     if (dialog.open) closeModal();
     await A.signOut(auth);
     return;
@@ -415,9 +494,28 @@ async function handleAction(el) {
     return;
   }
   if (action === "open") {
+    guestSearch = "";
+    guestFilter = "all";
     selected = id;
-    view = "menu";
+    view = "overview";
     render();
+    return;
+  }
+  if (action === "task") {
+    guestSearch = "";
+    guestFilter = el.dataset.filter || "all";
+    view = el.dataset.tab;
+    render();
+    return;
+  }
+  if (action === "clear-filters") {
+    guestSearch = "";
+    guestFilter = "all";
+    render();
+    return;
+  }
+  if (action === "assign") {
+    seatingDialog(id);
     return;
   }
   if (action === "tab") {
@@ -623,7 +721,11 @@ async function perform(fn) {
     busy = false;
     closeModal();
     render();
-    notice("Changes saved.");
+    notice(
+      demoMode
+        ? "Demo updated. Changes reset when you refresh."
+        : "Changes saved.",
+    );
   } catch (e) {
     const target = dialog.open
       ? dialog.querySelector(".form-error")
@@ -639,7 +741,19 @@ document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
   if (el) handleAction(el).catch((err) => notice(errorMessage(err)));
 });
+document.addEventListener("input", (e) => {
+  if (e.target.id === "guest-search") {
+    guestSearch = e.target.value;
+    document.querySelector("#guest-results").innerHTML =
+      guestResults(current());
+  }
+});
 document.addEventListener("change", (e) => {
+  if (e.target.id === "guest-filter") {
+    guestFilter = e.target.value;
+    document.querySelector("#guest-results").innerHTML =
+      guestResults(current());
+  }
   if (e.target.id === "venueFilter") {
     filter = e.target.value;
     render();
@@ -699,6 +813,12 @@ document.addEventListener("submit", async (e) => {
       return;
     }
     const w = current();
+    if (kind === "assign") {
+      await mutate("edit", {
+        guests: assignSeats(w, f.getAll("guestIds"), val("tableId") || null),
+      });
+      return;
+    }
     if (kind === "new") {
       await mutate("create", {
         eventDetails: {
@@ -711,7 +831,7 @@ document.addEventListener("submit", async (e) => {
           .filter(Boolean)
           .map((e) => e.toLowerCase()),
       });
-      view = "menu";
+      view = "overview";
       return;
     }
     if (kind === "guest") {
@@ -881,7 +1001,7 @@ async function sessionChanged(next) {
           app.inert = false;
           modalContext = null;
         }
-        app.innerHTML = `<section class="welcome"><h1>Unable to load weddings</h1><p>${esc(errorMessage(err))}</p>${btn("Sign out", "logout")}</section>`;
+        app.innerHTML = `<section class="welcome"><h1>Unable to load weddings</h1><p>${esc(errorMessage(err))}</p>${btn(demoMode ? "Reset demo" : "Sign out", "logout")}</section>`;
       },
     );
   } catch (e) {
@@ -890,6 +1010,21 @@ async function sessionChanged(next) {
   }
 }
 async function start() {
+  if (demoMode) {
+    const { createDemo } = await import("./demo.mjs");
+    demoStore = createDemo();
+    user = {
+      uid: "demo-staff",
+      email: "staff@example.com",
+      emailVerified: true,
+    };
+    staff = true;
+    weddings = demoStore.list(staff);
+    selected = "sample-wedding";
+    view = "overview";
+    render();
+    return;
+  }
   try {
     const r = await fetch("/api/config", { cache: "no-store" });
     const config = await r.json();
@@ -908,7 +1043,7 @@ async function start() {
     await A.setPersistence(auth, A.browserSessionPersistence);
     A.onAuthStateChanged(auth, sessionChanged);
   } catch (e) {
-    app.innerHTML = `<section class="welcome"><p class="eyebrow">MCN COLLECTION</p><h1>Wedding Day Plan</h1><p>Shared saving is not connected yet.</p><p class="muted">The venue team needs to finish the Firebase setup before accounts and wedding records are available.</p><button type="button" id="retry">Try again</button></section>`;
+    app.innerHTML = `<section class="welcome"><p class="eyebrow">MCN COLLECTION</p><h1>Wedding Day Plan</h1><p>Shared saving is not connected yet.</p><p class="muted">The venue team needs to finish the Firebase setup before accounts and wedding records are available.</p><button type="button" id="retry">Try again</button><p><a href="/demo.html">Explore the demo wedding</a></p></section>`;
     document.querySelector("#retry").onclick = () => location.reload();
   }
 }
