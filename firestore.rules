@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function verified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function staff() {
+      return verified() && request.auth.token.get('staff', false) == true;
+    }
+    match /weddings/{id} {
+      allow read: if staff() || (verified() && resource.data.archived == false
+        && request.auth.token.email.lower() in resource.data.coupleEmails);
+      // All changes pass through the authenticated API. Never allow direct client writes.
+      allow write: if false;
+      match /versions/{version} {
+        allow read, write: if false;
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
