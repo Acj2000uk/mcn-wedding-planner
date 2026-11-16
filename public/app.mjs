@@ -36,7 +36,7 @@ const dateLabel = (d) =>
     month: "short",
     year: "numeric",
   });
-const demoMode = location.pathname === "/demo.html";
+const demoMode = ["/demo.html", "/demo", "/demo/"].includes(location.pathname);
 let demoStore;
 let guestSearch = "",
   guestFilter = "all";
