@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "weddings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "coupleEmails",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "archived",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
